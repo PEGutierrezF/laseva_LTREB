@@ -121,13 +121,3 @@ combined_plot <- (plot_tr | plot_shannon) / (plot_simpson | plot_family) +
 # Display combined plot
 combined_plot
 
-
-laselva_z$ENSO <- ifelse(laselva_z$ONI_First > 0.5, "Niño",
-                     ifelse(laselva_z$ONI_First < -0.5, "Niña", "Neutral"))
-kruskal.test(CG_Rich ~ ENSO, data = laselva_z)
-
-
-library(ggplot2)
-ggplot(laselva_z, aes(x = ENSO, y = Sc_Rich)) +
-  geom_boxplot() +
-  geom_jitter(width = 0.1)
