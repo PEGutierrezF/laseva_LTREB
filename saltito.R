@@ -1,38 +1,41 @@
 
 
-# -------------------------------
-# Load required libraries
-# -------------------------------
+
+
+# ==================================================
+#  ENSO Effects on Richness and Diversity - SALTITO
+# ==================================================
+
+# Load libraries
 library(readxl)
 library(dplyr)
 library(ggplot2)
 library(mgcv)
-library(nlme)       # needed for random effects and corAR1
+library(nlme)
 library(patchwork)
 library(lubridate)
 
 # -------------------------------
 # Load and prepare data
 # -------------------------------
-laselva <- read_excel("laselva.xlsx", sheet="carapa")
+saltito <- read_excel("laselva.xlsx", sheet = "saltito")
 
 # Standardize selected variables and clean names
-laselva_z <- laselva %>%
+saltito_z <- saltito %>%
   rename(ONI_First = `ONI-First`) %>%
-  mutate(across(c(`CG-Rich`, `Fi-Rich`, `Pi-Rich`, `Pr-Rich`, `Sc-Rich`, `Sh-Rich`,
+  mutate(across(c(`CG-Rich`, `Fi-Rich`, `Pr-Rich`, `Sc-Rich`, `Sh-Rich`,
                   `Total-Rich`, Shannon_H, `Simpson_1-D`, `FamRichness`,
                   `Tricho`, `Dipt`, `Non-Insects`),
                 ~ scale(.)[,1], .names = "{.col}_z"))
 
-laselva_z$Date <- dmy(paste0("01-", laselva_z$Date))  # if Date is like "Jan-1997"
-laselva_z$Year <- year(laselva_z$Date)
-
+saltito_z$Date <- dmy(paste0("01-", saltito_z$Date))  # if Date is like "Jan-1997"
+saltito_z$Year <- year(saltito_z$Date)
 
 # Replace hyphens with underscores for convenience
-names(laselva_z) <- gsub("-", "_", names(laselva_z))
+names(saltito_z) <- gsub("-", "_", names(saltito_z))
 
 # -------------------------------
-# Function to create GAMM plots with confidence intervals
+# Function to create GAMM plots
 # -------------------------------
 plot_gamm <- function(model, data, y_var, y_label, line_color){
   
@@ -45,7 +48,7 @@ plot_gamm <- function(model, data, y_var, y_label, line_color){
   new_data$se  <- pred$se.fit
   
   ggplot() +
-    geom_point(data = data, aes_string(x = "ONI_First", y = y_var),
+    geom_point(data = data, aes(x = ONI_First, y = !!sym(y_var)),
                color = "grey60", alpha = 0.6) +
     geom_line(data = new_data, aes(x = ONI_First, y = fit),
               color = line_color, linewidth = 1.2) +
@@ -58,28 +61,27 @@ plot_gamm <- function(model, data, y_var, y_label, line_color){
 }
 
 # -------------------------------
-# Fit GAMMs with Months and Year as random effects
-# and AR1 autocorrelation by Months | Year
+# Fit GAMMs with Month and Year as random effects
 # -------------------------------
 mod1 <- gamm(Total_Rich_z ~ s(ONI_First),
-             random = list(Months=~1, Year=~1),
+             random = list(Months = ~1, Year = ~1),
              correlation = corAR1(form = ~ Months | Year),
-             data = laselva_z)
+             data = saltito_z)
 
 mod2 <- gamm(Shannon_H_z ~ s(ONI_First),
-             random = list(Months=~1, Year=~1),
+             random = list(Months = ~1, Year = ~1),
              correlation = corAR1(form = ~ Months | Year),
-             data = laselva_z)
+             data = saltito_z)
 
 mod3 <- gamm(Simpson_1_D_z ~ s(ONI_First),
-             random = list(Months=~1, Year=~1),
+             random = list(Months = ~1, Year = ~1),
              correlation = corAR1(form = ~ Months | Year),
-             data = laselva_z)
+             data = saltito_z)
 
 mod4 <- gamm(FamRichness_z ~ s(ONI_First),
-             random = list(Months=~1, Year=~1),
+             random = list(Months = ~1, Year = ~1),
              correlation = corAR1(form = ~ Months | Year),
-             data = laselva_z)
+             data = saltito_z)
 
 # -------------------------------
 # Summarize GAMM components
@@ -106,18 +108,19 @@ acf(residuals(mod4$lme, type = "normalized"), plot = FALSE)$acf[2]
 # -------------------------------
 # Create GAMM plots
 # -------------------------------
-plot_tr      <- plot_gamm(mod1, laselva_z, "Total_Rich_z", "Total Richness (z-score)", "blue")
-plot_shannon <- plot_gamm(mod2, laselva_z, "Shannon_H_z", "Shannon Diversity (z-score)", "darkred")
-plot_simpson <- plot_gamm(mod3, laselva_z, "Simpson_1_D_z", "Simpson 1-D (z-score)", "darkgreen")
-plot_family  <- plot_gamm(mod4, laselva_z, "FamRichness_z", "Family Richness (z-score)", "purple")
+plot_tr      <- plot_gamm(mod1, saltito_z, "Total_Rich_z", "Total Richness (z-score)", "blue")
+plot_shannon <- plot_gamm(mod2, saltito_z, "Shannon_H_z", "Shannon Diversity (z-score)", "darkred")
+plot_simpson <- plot_gamm(mod3, saltito_z, "Simpson_1_D_z", "Simpson 1-D (z-score)", "darkgreen")
+plot_family  <- plot_gamm(mod4, saltito_z, "FamRichness_z", "Family Richness (z-score)", "purple")
 
 # -------------------------------
 # Combine plots 2x2 using patchwork
 # -------------------------------
-combined_plot <- (plot_tr | plot_shannon) / (plot_simpson | plot_family) +
-  plot_annotation(title = "",
+combined_plot_s <- (plot_tr | plot_shannon) / (plot_simpson | plot_family) +
+  plot_annotation(title = "Saltito Site: Richness and Diversity vs ENSO (ONI)",
                   theme = theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 16)))
 
-# Display combined plot
-combined_plot
+combined_plot_s
 
+# Display combined plot
+combined_plot | combined_plot_s
