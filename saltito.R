@@ -31,6 +31,9 @@ saltito_z <- saltito %>%
 saltito_z$Date <- dmy(paste0("01-", saltito_z$Date))  # if Date is like "Jan-1997"
 saltito_z$Year <- year(saltito_z$Date)
 
+saltito_z <- saltito_z %>%
+  mutate(Month_idx = lubridate::month(Date))
+
 # Replace hyphens with underscores for convenience
 names(saltito_z) <- gsub("-", "_", names(saltito_z))
 
@@ -65,22 +68,22 @@ plot_gamm <- function(model, data, y_var, y_label, line_color){
 # -------------------------------
 mod1 <- gamm(Total_Rich_z ~ s(ONI_First),
              random = list(Months = ~1, Year = ~1),
-             correlation = corAR1(form = ~ Months | Year),
+             correlation = corAR1(form = ~ Month_idx | Year),
              data = saltito_z)
 
 mod2 <- gamm(Shannon_H_z ~ s(ONI_First),
              random = list(Months = ~1, Year = ~1),
-             correlation = corAR1(form = ~ Months | Year),
+             correlation = corAR1(form = ~ Month_idx | Year),
              data = saltito_z)
 
 mod3 <- gamm(Simpson_1_D_z ~ s(ONI_First),
              random = list(Months = ~1, Year = ~1),
-             correlation = corAR1(form = ~ Months | Year),
+             correlation = corAR1(form = ~ Month_idx | Year),
              data = saltito_z)
 
 mod4 <- gamm(FamRichness_z ~ s(ONI_First),
              random = list(Months = ~1, Year = ~1),
-             correlation = corAR1(form = ~ Months | Year),
+             correlation = corAR1(form = ~ Month_idx | Year),
              data = saltito_z)
 
 # -------------------------------
@@ -124,3 +127,5 @@ combined_plot_s
 
 # Display combined plot
 combined_plot | combined_plot_s
+
+

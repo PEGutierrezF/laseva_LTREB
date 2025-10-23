@@ -1,5 +1,3 @@
-
-
 # -------------------------------
 # Load required libraries
 # -------------------------------
@@ -14,22 +12,23 @@ library(lubridate)
 # -------------------------------
 # Load and prepare data
 # -------------------------------
-laselva <- read_excel("laselva.xlsx", sheet="carapa")
+carapa <- read_excel("laselva.xlsx", sheet="carapa")
 
 # Standardize selected variables and clean names
-laselva_z <- laselva %>%
+carapa_z <- carapa %>%
   rename(ONI_First = `ONI-First`) %>%
   mutate(across(c(`CG-Rich`, `Fi-Rich`, `Pi-Rich`, `Pr-Rich`, `Sc-Rich`, `Sh-Rich`,
                   `Total-Rich`, Shannon_H, `Simpson_1-D`, `FamRichness`,
-                  `Tricho`, `Dipt`, `Non-Insects`),
+                  Tricho, Dipt, `Non-Insects`),
                 ~ scale(.)[,1], .names = "{.col}_z"))
 
-laselva_z$Date <- dmy(paste0("01-", laselva_z$Date))  # if Date is like "Jan-1997"
-laselva_z$Year <- year(laselva_z$Date)
-
+# Parse Date and extract Year and Month
+carapa_z$Date <- dmy(paste0("01-", carapa_z$Date))  # if Date is like "Jan-1997"
+carapa_z$Year  <- year(carapa_z$Date)
+carapa_z$Month_idx <- month(carapa_z$Date)
 
 # Replace hyphens with underscores for convenience
-names(laselva_z) <- gsub("-", "_", names(laselva_z))
+names(carapa_z) <- gsub("-", "_", names(carapa_z))
 
 # -------------------------------
 # Function to create GAMM plots with confidence intervals
@@ -59,27 +58,27 @@ plot_gamm <- function(model, data, y_var, y_label, line_color){
 
 # -------------------------------
 # Fit GAMMs with Months and Year as random effects
-# and AR1 autocorrelation by Months | Year
+# and AR1 autocorrelation by Month_idx | Year
 # -------------------------------
 mod1 <- gamm(Total_Rich_z ~ s(ONI_First),
-             random = list(Months=~1, Year=~1),
-             correlation = corAR1(form = ~ Months | Year),
-             data = laselva_z)
+             random = list(Month_idx=~1, Year=~1),
+             correlation = corAR1(form = ~ Month_idx | Year),
+             data = carapa_z)
 
 mod2 <- gamm(Shannon_H_z ~ s(ONI_First),
-             random = list(Months=~1, Year=~1),
-             correlation = corAR1(form = ~ Months | Year),
-             data = laselva_z)
+             random = list(Month_idx=~1, Year=~1),
+             correlation = corAR1(form = ~ Month_idx | Year),
+             data = carapa_z)
 
 mod3 <- gamm(Simpson_1_D_z ~ s(ONI_First),
-             random = list(Months=~1, Year=~1),
-             correlation = corAR1(form = ~ Months | Year),
-             data = laselva_z)
+             random = list(Month_idx=~1, Year=~1),
+             correlation = corAR1(form = ~ Month_idx | Year),
+             data = carapa_z)
 
 mod4 <- gamm(FamRichness_z ~ s(ONI_First),
-             random = list(Months=~1, Year=~1),
-             correlation = corAR1(form = ~ Months | Year),
-             data = laselva_z)
+             random = list(Month_idx=~1, Year=~1),
+             correlation = corAR1(form = ~ Month_idx | Year),
+             data = carapa_z)
 
 # -------------------------------
 # Summarize GAMM components
@@ -106,18 +105,17 @@ acf(residuals(mod4$lme, type = "normalized"), plot = FALSE)$acf[2]
 # -------------------------------
 # Create GAMM plots
 # -------------------------------
-plot_tr      <- plot_gamm(mod1, laselva_z, "Total_Rich_z", "Total Richness (z-score)", "blue")
-plot_shannon <- plot_gamm(mod2, laselva_z, "Shannon_H_z", "Shannon Diversity (z-score)", "darkred")
-plot_simpson <- plot_gamm(mod3, laselva_z, "Simpson_1_D_z", "Simpson 1-D (z-score)", "darkgreen")
-plot_family  <- plot_gamm(mod4, laselva_z, "FamRichness_z", "Family Richness (z-score)", "purple")
+plot_tr      <- plot_gamm(mod1, carapa_z, "Total_Rich_z", "Total Richness (z-score)", "blue")
+plot_shannon <- plot_gamm(mod2, carapa_z, "Shannon_H_z", "Shannon Diversity (z-score)", "darkred")
+plot_simpson <- plot_gamm(mod3, carapa_z, "Simpson_1_D_z", "Simpson 1-D (z-score)", "darkgreen")
+plot_family  <- plot_gamm(mod4, carapa_z, "FamRichness_z", "Family Richness (z-score)", "purple")
 
 # -------------------------------
 # Combine plots 2x2 using patchwork
 # -------------------------------
 combined_plot <- (plot_tr | plot_shannon) / (plot_simpson | plot_family) +
-  plot_annotation(title = "",
+  plot_annotation(title = "Carapa Site: Richness and Diversity vs ENSO (ONI)",
                   theme = theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 16)))
 
 # Display combined plot
 combined_plot
-
