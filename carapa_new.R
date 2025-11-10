@@ -1,6 +1,7 @@
 # -------------------------------
 # Load libraries
 # -------------------------------
+install.packages("fitdistrplus")
 library(readxl)
 library(dplyr)
 library(lubridate)
@@ -22,28 +23,49 @@ laselva$Date <- dmy(paste0("01-", laselva$Date))  # e.g., "Jan-1997" -> "1997-01
 # Extract Year and Month index
 laselva$Year <- year(laselva$Date)
 laselva$Month_idx <- month(laselva$Date)
+head(laselva,13)
 
 # Make stream a factor
 laselva$stream <- factor(laselva$stream)
 
 # Create factor for AR1 (unique time points)
+# Date (class Date) no funciona directamente en el AR1 de glmmTMB
 laselva$time_f <- factor(laselva$Date, levels = sort(unique(laselva$Date)))
+head(laselva,13)
 
 # Quick summary
 summary(laselva$value)
+ggplot(laselva, aes(value)) +
+  geom_histogram(bins = 50)
+
 fitdistrplus::descdist(laselva$value, discrete = TRUE)
+# We checked the distribution of the count variable (value) using fitdistrplus::descdist(). The summary shows:
+# Mean = 12.3
+# Variance (SD²) ≈ 6.24² = 38.9
+# So variance >> mean
+# For count data, this indicates overdispersion.
+# If the data were well described by a Poisson, we would expect:
+# Mean ≈ Variance
+# https://cran.r-project.org/web/packages/GlmSimulatoR/vignettes/count_data_and_overdispersion.html
+
 
 # -------------------------------
 # Fit negative binomial GLMM with AR1
 # -------------------------------
-m_oni_ar1 <- glmmTMB(
-  value ~ `ONI-First` + stream + ar1(time_f | stream),  # AR1 autocorrelation by stream
-  family = nbinom2,                                     # overdispersed counts
+# We use glmmTMB with negative binomial because 'value' is count data with overdispersion 
+# (variance >> mean). We include both streams and model AR1 autocorrelation within each stream.
+# glmmTMB allows flexible specification of distributions (Poisson, negative binomial, Gaussian, etc.),
+# random effects, and correlation structures, making it ideal for overdispersed count data with repeated measures.
+
+model1 <- glmmTMB(
+  value ~ `ONI-First` + stream + 
+    ar1(time_f | stream),  # AR1 autocorrelation by stream
+  family = nbinom2,        # overdispersed counts
   data = laselva
 )
 
 
-summary(m_oni_ar1)
+summary(model1)
 
 # -------------------------------
 # Extract residuals
