@@ -64,17 +64,16 @@ model1 <- glmmTMB(
   data = laselva
 )
 
-
 summary(model1)
 
 # -------------------------------
 # Extract residuals
 # -------------------------------
 # Pearson residuals
-resid_pearson <- residuals(m_oni_ar1, type = "pearson")
+resid_pearson <- residuals(model1, type = "pearson")
 
 # Fitted values
-fitted_vals <- fitted(m_oni_ar1)
+fitted_vals <- fitted(model1)
 
 # -------------------------------
 # Residual plots
