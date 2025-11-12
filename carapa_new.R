@@ -1,13 +1,15 @@
 # -------------------------------
 # Load libraries
 # -------------------------------
-install.packages("fitdistrplus")
+# install.packages("DHARMa")
 library(readxl)
 library(dplyr)
 library(lubridate)
 library(glmmTMB)
 library(ggplot2)
 library(fitdistrplus)
+library(nlme)
+library(DHARMa)
 
 # -------------------------------
 # Load data
@@ -25,8 +27,15 @@ laselva$Year <- year(laselva$Date)
 laselva$Month_idx <- month(laselva$Date)
 head(laselva,13)
 
+# -------------------------------
+# Subset months (Feb, May, Sep) and remove 2024
+# -------------------------------
+laselva <- laselva[laselva$Month_idx %in% c(2,5,9) & laselva$Year != 2024, ]
+head(laselva, 13)
+
 # Make stream a factor
 laselva$stream <- factor(laselva$stream)
+
 
 # Create factor for AR1 (unique time points)
 # Date (class Date) no funciona directamente en el AR1 de glmmTMB
@@ -47,7 +56,7 @@ fitdistrplus::descdist(laselva$value, discrete = TRUE)
 # If the data were well described by a Poisson, we would expect:
 # Mean ≈ Variance
 # https://cran.r-project.org/web/packages/GlmSimulatoR/vignettes/count_data_and_overdispersion.html
-
+# https://pacificpapermill.com/slideshows/PPM__Poisson_Regression.pdf
 
 # -------------------------------
 # Fit negative binomial GLMM with AR1
@@ -56,55 +65,86 @@ fitdistrplus::descdist(laselva$value, discrete = TRUE)
 # (variance >> mean). We include both streams and model AR1 autocorrelation within each stream.
 # glmmTMB allows flexible specification of distributions (Poisson, negative binomial, Gaussian, etc.),
 # random effects, and correlation structures, making it ideal for overdispersed count data with repeated measures.
+# Include stream as random effect. AR1 autocorrelation omitted to avoid convergence issues.
+laselva <- laselva %>%
+  group_by(stream) %>%
+  arrange(Months, .by_group = TRUE) %>%
+  mutate(time_factor = factor(row_number())) %>%
+  ungroup()
 
+# Ajustar el modelo AR1 usando time_factor
 model1 <- glmmTMB(
-  value ~ `ONI-First` + stream + 
-    ar1(time_f | stream),  # AR1 autocorrelation by stream
-  family = nbinom2,        # overdispersed counts
+  value ~ ONI_First + SOI + ENSO + temp_min + rain_51 + stream +
+    ar1(time_factor + 0 | stream),  # AR1 por stream
+  family = nbinom2,
   data = laselva
 )
 
-summary(model1)
+# This model may be more appropriate because:
+# 1) Accounts for repeated measures / grouped data:
+#    a) Multiple observations within the same year
+#    b) Observations in the same year are not independent
+# 2) Captures unmeasured annual variation:
+#    a) There may be factors affecting insect counts each year that are not included in the model 
+#       (e.g., unusual weather events, habitat changes, sampling differences)
+#    b) The random intercept allows each year to shift the baseline abundance up or down
+# 3) Partially controls for temporal autocorrelation:
+#    a) Observations are trimestral and not evenly spaced, so a classical AR1 correlation is not ideal
+#    b) By allowing each year to have its own intercept, observations within the same year are more similar 
+#       than those in other years
+model2 <- glmmTMB(
+  value ~ ONI_First + SOI + ENSO + temp_min + rain_51 + stream +
+    (1 | Year),  # random intercept for Year
+  family = nbinom2,
+  data = laselva
+)
+
+summary(model1)                          
+summary(model2) 
+
 
 # -------------------------------
 # Extract residuals
 # -------------------------------
-# Pearson residuals
-resid_pearson <- residuals(model1, type = "pearson")
+# Simular residuales DHARMa
+res <- simulateResiduals(model2, n = 1000)
 
-# Fitted values
-fitted_vals <- fitted(model1)
+# Graficar residuales
+plot(res)
+testUniformity(res) 
+testDispersion(res)
 
-# -------------------------------
-# Residual plots
-# -------------------------------
+# Calcular autocorrelación por stream, ignorando NAs
+unique_streams <- unique(laselva$stream)
 
-# 1️⃣ Histogram of Pearson residuals
-ggplot(data.frame(resid = resid_pearson), aes(x = resid)) +
-  geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
-  theme_minimal() +
-  labs(title = "Histogram of Pearson Residuals")
+for(s in unique_streams){
+  cat("Autocorrelation for stream:", s, "\n")
+  
+  # Subset indices para este stream
+  idx <- which(laselva$stream == s)
+  
+  # Extraer residuales escalados para este stream
+  res_num <- residuals(res, type = "scaled")[idx]
+  
+  # Eliminar NAs
+  res_num <- res_num[!is.na(res_num)]
+  
+  # Calcular autocorrelación usando cor()
+  if(length(res_num) > 1){
+    acf_val <- cor(res_num[-length(res_num)], res_num[-1])
+    cat("Lag-1 autocorrelation:", round(acf_val, 3), "\n\n")
+  } else {
+    cat("No enough data for autocorrelation\n\n")
+  }
+}
 
-# 2️⃣ Residuals vs Fitted
-ggplot(data.frame(resid = resid_pearson, fitted = fitted_vals), aes(x = fitted, y = resid)) +
-  geom_point(alpha = 0.6) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  theme_minimal() +
-  labs(title = "Residuals vs Fitted Values")
 
-# 3️⃣ Residuals over time by stream
-ggplot(data.frame(resid = resid_pearson, time = laselva$Date, stream = laselva$stream),
-       aes(x = time, y = resid, color = stream)) +
-  geom_point() +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  theme_minimal() +
-  labs(title = "Residuals over Time by Stream")
+# Alternatively, Durbin-Watson test for autocorrelation
+library(lmtest)
+dwtest(model2)
 
-# -------------------------------
-# Optional: Check fitted effect of ONI-First
-# -------------------------------
-ggplot(laselva, aes(x = `ONI-First`, y = value, color = stream)) +
-  geom_point(alpha = 0.6) +
-  geom_smooth(method = "glm", method.args = list(family = "poisson"), se = TRUE) +
-  theme_minimal() +
-  labs(title = "Effect of ONI-First on Total Richness by Stream")
+# We assessed autocorrelation. While there is noticeable autocorrelation in Carapa, 
+# it is not strictly appropriate to account for temporal autocorrelation using AR1 models 
+# because the observations are not equally spaced in time and the series are not fully linear 
+# (for example, there are longer intervals between September -> February than 
+# between February -> May and May -> September).
