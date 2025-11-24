@@ -1,0 +1,206 @@
+---
+title: "taxonomy richness"
+output:
+  pdf_document:
+    latex_engine: xelatex
+date: "2025-11-19"
+---
+
+```{r setup, include=FALSE}
+# install.packages("DHARMa")
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(glmmTMB)
+library(ggplot2)
+library(fitdistrplus)
+library(nlme)
+library(DHARMa)
+```
+
+
+## Load data
+```{r}
+laselva <- read_excel("laselva.xlsx", sheet = "alldata")
+```
+<br><br>
+
+### Convert Date to proper Date object
+```{r}
+laselva$Date <- dmy(paste0("01-", laselva$Date))  # e.g., "Jan-1997" -> "1997-01-01"
+```
+<br><br>
+
+
+### Extract Year and Month index
+```{r}
+laselva$Year <- year(laselva$Date)
+laselva$Month_idx <- month(laselva$Date)
+head(laselva,13)
+```
+<br><br>
+
+
+### Subset months (Feb, May, Sep) and remove 2024
+```{r}
+laselva <- laselva[laselva$Month_idx %in% c(2,5,9) &
+                     laselva$Year != 2024, ]
+head(laselva, 13)
+tail(laselva,13)
+```
+<br><br>
+
+
+## Make stream a factor
+```{r}
+laselva$stream <- factor(laselva$stream)
+```
+<br><br>
+
+
+## Create factor for AR1 (unique time points)
+- Date (class Date) no funciona directamente en el AR1 de glmmTMB
+```{r}
+laselva$time_f <- factor(laselva$Date, 
+                         levels = sort(unique(laselva$Date)))
+head(laselva,13)
+```
+<br><br>
+
+## Quick summary
+```{r}
+summary(laselva$value)
+ggplot(laselva, aes(value)) +
+  geom_histogram(bins = 50)
+```
+<br><br>
+
+
+## Distribution check
+- We checked the distribution of the count variable (value) using fitdistrplus::descdist(). 
+- The summary shows:
+    - Mean = 10.6
+    - Variance (SD²) ≈ 6.04² = 36.48
+  - So variance >> mean
+- Since the variance was much larger than the mean (variance >> mean), **the data violated the Poisson assumption of mean ≈ variance**. This level of overdispersion is typical of ecological count data, and **therefore a negative binomial** model provides a more appropriate and flexible error structure for the analysis.
+- https://cran.r-project.org/web/packages/GlmSimulatoR/vignettes/count_data_and_overdispersion.html
+- https://pacificpapermill.com/slideshows/PPM__Poisson_Regression.pdf
+```{r}
+fitdistrplus::descdist(laselva$value, discrete = TRUE)
+```
+<br><br>
+
+## Fit negative binomial GLMM
+- We use a negative binomial distribution because ‘value’ is **overdispersed count data**.  
+    - (variance >> mean, assessed with fitdistrplus::descdist()).
+- glmmTMB is ideal because it accommodates overdispersion, random effects, and correlation structures.
+
+```{r}
+laselva <- laselva %>%
+  group_by(stream) %>%
+  arrange(Months, .by_group = TRUE) %>%
+  mutate(time_factor = factor(row_number())) %>%
+  ungroup()
+
+# Ajustar el modelo AR1 usando time_factor
+mod1 <- glmmTMB(
+  value ~ ONI_First + SOI + ENSO + temp_min + rain_51 + stream +
+    ar1(time_factor + 0 | stream),  # AR1 por stream
+  family = nbinom2,
+  data = laselva
+)
+
+summary(mod1)
+
+```
+### Results and limitations of the AR1 model
+- The AR1 model fits but shows an unrealistically large dispersion parameter
+(5.7 × 10⁸), and **AR1 assumptions are questionable because sampling was quarterly and not equally spaced across the year**.
+
+<br><br>
+
+## Why AR1 is not ideal here?
+- Temporal spacing is irregular:  
+    - Feb → May → Sep → (next Feb)
+    - **AR1 assumes constant ∆t (equally spaced time steps). When spacing is uneven, AR1 overestimates correlation and produces unstable estimates (REFERENCE).**
+
+- Only three sampling points per year.
+    - AR1 needs longer, regularly sampled time series to be statistically meaningful.
+
+- Each year begins again at “time = 1”
+This breaks the AR1 chain, making the correlation structure artificial. AR1 assumes uniform time steps and a continuous series, which is not the case here.
+
+<br><br>
+
+## More appropriate alternative: Random intercept for Year
+```{r}
+mod2 <- glmmTMB(
+  value ~ ONI_First + SOI + ENSO + temp_min + rain_51 + stream +
+    (1 | Year),  # random intercept for Year
+  family = nbinom2,
+  data = laselva
+)
+
+summary(mod2)
+```
+
+## Why model2 is more appropriate
+1) Accounts for repeated measures / grouped structure
+    - Multiple observations occur within each year, and those observations are not independent.
+
+2) Captures unmeasured annual variation
+    - Each year may differ due to unrecorded events (storms, droughts).
+    - The random intercept lets each year shift the baseline taxon_rich/abundance/...
+
+3) Controls temporal dependence indirectly
+    - **Quarterly sampling is not evenly spaced, so classical AR1 is inappropriate.**
+    - A random intercept groups observations within each year so that measurements taken in the same year are more similar to each other than to
+those from other years, partially accounting for temporal autocorrelation without misusing an AR1 structure.
+<br><br><br><br>
+
+## Residuals diagnostics
+```{r}
+res <- simulateResiduals(mod2, n = 1000)
+```
+<br><br>
+
+## plots Residuals
+```{r}
+plot(res)
+
+
+```
+<br><br>
+
+
+## Uniformity test
+- The Kolmogorov–Smirnov test on the DHARMa scaled residuals shows no deviation from the expected uniform distribution (D = 0.050, p = 0.929). **This indicates that the model's residuals are well behaved and that there is no evidence of major distributional misspecification**.
+```{r}
+testUniformity(res) 
+```
+<br><br>
+
+
+## Dispersion test
+- The DHARMa dispersion test indicates that the model does not show evidence of overdispersion. The dispersion value is close to 1 (1.0662) and the high p-value (0.678) means we cannot reject the null hypothesis of correct dispersion. This suggests that the negative binomial GLMM adequately captures the variance structure of the count data.
+```{r}
+testDispersion(res)
+```
+
+
+
+## Model with <
+```{r}
+mod3 <- glmmTMB(
+  value ~ ONI_First + SOI + ENSO + temp_min + rain_1.4 + stream +
+    (1 | Year),  # random intercept for Year
+  family = nbinom2,
+  data = laselva
+)
+
+summary(mod3)
+```
+
+
+
+
