@@ -202,5 +202,24 @@ summary(mod3)
 ```
 
 
+#### Mod4 
+Lo intenté, pero paso lo que creia. El número de ríos es demasiado pequeño para tratarlos como un efecto aleatorio. Con solo dos niveles, la varianza entre ríos no se puede estimar de forma estable. El modelo devuelve una varianza prácticamente cero (en el orden de 3.758e-10) y un SD de 1.939e-05, lo que dice que el componente aleatorio está esencialmente no identificado.
 
+En cuanto a incluir Year como factor, el problema es que gran parte de la variabilidad interanual ya está representada en los predictores climáticos (ONI, SOI, ENSO, temperatura, lluvia). Al poner Year como efecto fijo, el modelo termina absorbiendo esa señal climática y dificulta detectar efectos independientes de los predictores. Por eso es que la mayoría de los años aparece como significativa: el factor Year está capturando toda la estructura temporal que ya explican las variables climáticas.
+
+
+```{r}
+laselva$Year <- factor(laselva$Year)
+```
+
+```{r}
+mod4 <- glmmTMB(
+  value ~ ONI_First + SOI + ENSO + temp_min + rain_51 + Year +
+    (1 | stream),   # stream como efecto aleatorio
+  family = nbinom2,
+  data = laselva
+)
+
+summary(mod4)
+```
 
